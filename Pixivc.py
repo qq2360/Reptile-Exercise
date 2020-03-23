@@ -6,6 +6,8 @@ import time
 import os
 import sys
 import getopt
+import datetime
+import calendar
 
 base_uri="https://i.pximg.net"
 origin_uri="https://original.img.cheerfun.dev"
@@ -22,11 +24,37 @@ downloadHeaders={
     "User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.149 Safari/537.36"
     }
 
+currentTime=datetime.datetime.now()
 
-date="2020-03-01"
-mode="month"
-downloadDir="/home/qabns/images"
-pages=1
+def AutoSetTime(mode):
+    global date
+    if mode == "day":
+        date=datetime.datetime.strftime(currentTime.date(),'%Y-%m-%d')[:-2]+str(currentTime.day-3)
+    elif mode == "week":
+        day=""
+        month=""
+        year=""
+        if d:=currentTime.day-7 < 0:
+            day=calender.monthrange(currentTime.year,currentTime.month-1)[1]+d
+            if currentTime.month-1==0:
+                month=12
+                year=currentTime.year-1
+            else:
+                month=currentTime.month-1
+                year=currentTime.year
+        else:
+            day=currentTime.day-7
+            month=currentTime.month
+            year=currentTime.year
+        if month < 10:
+            if day < 10:
+                date=str(year)+"-0"+str(month)+"-0"+str(day)
+            else:
+                date=str(year)+"-0"+str(month)+"-"+str(day)
+        else:
+            date=str(year)+str(month)+str(day)
+    elif mode == "month":
+        date=datetime.datetime.strftime(currentTime.date(),'%Y-%m-%d')[:-2]+"01"
 
 def download(url):
     d_r=requests.get(url,headers=downloadHeaders)
@@ -42,28 +70,43 @@ def download(url):
     else:
         print(str(d_r.status_code) +"!")
 
+#Change these field
+mode=""
+date=""
+downloadDir=""
+pages=0
+
 def main(argv):
     global date
     global mode
     global pages
     global downloadDir
     try:
-        opts,args=getopt.getopt(argv,"hd:m:p:d:",["help","date=","mode=","pages=","downloadDir="])
+        opts,args=getopt.getopt(argv,"hd:m:p:",["help","date=","mode=","pages=","dir=","debug"])
     except getopt.GetoptError:
         print("Error:Invaild args.")
         sys.exit()
     for opt,arg in opts:
         if opt == "-h":
-            print("usage:<this file>.py -d <date> -m <mode> -p <pages> -d <downloadDir>")
+            print("usage:<this file>.py -d <date> -m <mode> -p <pages> --dir <downloadDir>")
             sys.exit()
         elif opt in ("-d","--date"):
             date = arg
         elif opt in ("-m","--mode"):
             mode = arg
+            if opt not in ("-d","--date"):
+                AutoSetTime(mode)
         elif opt in ("-p","--pages"):
-            pages = arg
-        elif opt in ("-d","--downloadDir"):
+            pages = int(arg)
+        elif opt in "--dir":
             downloadDir = arg
+        #elif opt in "--debug":
+            #print(mode)
+            #print(currentTime)
+            #print(date)
+            #print(downloadDir)
+            #sys.exit()
+        else: print("WARNING:Use default config!!!")
     for page in range(1,pages+1):
         apiurl="https://api.pixivic.com/ranks?page="+str(page)+"&date="+date+"&mode="+mode
         r=requests.get(apiurl,headers=headers)
