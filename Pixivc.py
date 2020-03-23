@@ -2,16 +2,17 @@
 #-*- coding:utf-8 -*-
 
 import requests
-import time
 import os
 import sys
 import getopt
 import datetime
 import calendar
+import aiohttp
+import aiofiles
+import asyncio
 
 base_uri="https://i.pximg.net"
 origin_uri="https://original.img.cheerfun.dev"
-image_messages=[]
 headers={
     "User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.149 Safari/537.36"
     }
@@ -25,6 +26,13 @@ downloadHeaders={
     }
 
 currentTime=datetime.datetime.now()
+
+#Change these field
+mode=""
+date=""
+downloadDir=os.path.abspath('.')+"/images"
+pages=0
+async_mode=False
 
 def AutoSetTime(mode):
     global date
@@ -56,25 +64,23 @@ def AutoSetTime(mode):
     elif mode == "month":
         date=datetime.datetime.strftime(currentTime.date(),'%Y-%m-%d')[:-2]+"01"
 
+async def async_download(url):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url,headers=downloadHeaders) as res:
+            if res.status == 200:
+                if os.path.exists(downloadDir):
+                    async with aiofiles.open(downloadDir+url[url.rfind("/"):],"wb") as image:
+                        await image.write(await res.content.read())
+                else:
+                    os.mkdir(downloadDir)
+            else:
+                print(str(res.status) +"!")
+
 def download(url):
     d_r=requests.get(url,headers=downloadHeaders)
-    if d_r.status_code == 200:
-        if os.path.exists(downloadDir):
-            with open(downloadDir+url[url.rfind("/"):],"wb") as image:
-                try:
-                    image.write(d_r.content)
-                finally:
-                    image.close()
-        else:
-            os.mkdir(downloadDir)
-    else:
-        print(str(d_r.status_code) +"!")
+    with open(downloadDir+url[url.rfind("/"):],"wb") as image:
+        image.write(d_r.content)
 
-#Change these field
-mode=""
-date=""
-downloadDir=""
-pages=0
 
 def main(argv):
     global date
@@ -82,13 +88,13 @@ def main(argv):
     global pages
     global downloadDir
     try:
-        opts,args=getopt.getopt(argv,"hd:m:p:",["help","date=","mode=","pages=","dir=","debug"])
+        opts,args=getopt.getopt(argv,"hd:m:p:",["help","date=","mode=","pages=","dir=","enable-async-io"])
     except getopt.GetoptError:
         print("Error:Invaild args.")
         sys.exit()
     for opt,arg in opts:
         if opt == "-h":
-            print("usage:<this file>.py -d <date> -m <mode> -p <pages> --dir <downloadDir>")
+            print("usage:<this file>.py -d <date> -m <mode> -p <pages> --dir <downloadDir> [--enable-async-io]")
             sys.exit()
         elif opt in ("-d","--date"):
             date = arg
@@ -100,25 +106,22 @@ def main(argv):
             pages = int(arg)
         elif opt in "--dir":
             downloadDir = arg
-        #elif opt in "--debug":
-            #print(mode)
-            #print(currentTime)
-            #print(date)
-            #print(downloadDir)
-            #sys.exit()
-        else: print("WARNING:Use default config!!!")
+        elif opt in "--enable-async-io":
+            async_mode=True
     for page in range(1,pages+1):
+        loop=asyncio.get_event_loop()
         apiurl="https://api.pixivic.com/ranks?page="+str(page)+"&date="+date+"&mode="+mode
         r=requests.get(apiurl,headers=headers)
         r.encoding='utf-8'
         for datas in r.json()["data"]:
             for i_data in datas["imageUrls"]:
                 if base_uri in (image_URL:=i_data["original"]):
-                    image_messages.append(image_URL.replace(base_uri,origin_uri))
-        for m in image_messages:
-            download(m)
-        print("Done!Please to check your set dir.")
-        print("Your dir:"+downloadDir)
+                    if async_mode:
+                        loop.run_until_complete(loop.create_task(async_download(image_URL.replace(base_uri,origin_uri))))
+                    else:
+                        download(image_URL.replace(base_uri,origin_uri))
+    print("Done!Please to check your set dir.")
+    print("Your dir:"+downloadDir)
 
 if __name__ == "__main__":
     main(sys.argv[1:])
