@@ -1,173 +1,167 @@
-#!/usr/bin/env python3
-# -*- coding:utf-8 -*-
-
-import calendar
-import datetime
 import getopt
-import os
 import sys
-import time
-from concurrent.futures import ThreadPoolExecutor,wait,ALL_COMPLETED
-
-import aiofiles
+import datetime
+import calendar
 import aiohttp
+import aiofiles
 import asyncio
-import requests
+import os
+import multiprocessing
+from enum import Enum
 
-base_uri = "https://i.pximg.net"
-origin_uri = "https://original.img.cheerfun.dev"
-headers = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.149 "
-                  "Safari/537.36 "
-}
-
-downloadHeaders = {
-    "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
-    "Accept-Encoding": "gzip,deflate,br",
-    "Connection": "keep-alive",
-    "Referer": "https://pixivic.com/dailyRank",
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.149 "
-                  "Safari/537.36 "
-}
-
-currentTime = datetime.datetime.now()
-
-# Change these field
-mode = ""
-date = ""
-downloadDir = os.path.abspath('.') + "/images"
-pages = 0
-async_mode = False
+base_uri = 'https://i.pximg.net'
+origin_uri = 'https://original.img.cheerfun.dev'
 
 
-def AutoSetTime(m):
-    global date
-    if m == "day":
-        date = datetime.datetime.strftime(currentTime, '%Y-%m-%d')[:-2] + str(currentTime.day - 3)
-    elif m == "week":
-        if d := currentTime.day - 7 < 0:
-            day = calendar.monthrange(currentTime.year, currentTime.month - 1)[1] + d
-            if currentTime.month - 1 == 0:
-                month = 12
-                year = currentTime.year - 1
-            else:
-                month = currentTime.month - 1
-                year = currentTime.year
-        else:
-            day = currentTime.day - 7
-            month = currentTime.month
-            year = currentTime.year
-        if month < 10:
-            if day < 10:
-                date = str(year) + "-0" + str(month) + "-0" + str(day)
-            else:
-                date = str(year) + "-0" + str(month) + "-" + str(day)
-        else:
-            date = str(year) + str(month) + str(day)
-    elif m == "month":
-        date = datetime.datetime.strftime(currentTime, '%Y-%m-%d')[:-2] + "01"
-    return
+class ModeEnum(Enum):
+    DAY = "day"
+    WEEK = "week"
+    MONTH = "month"
 
 
-async def async_download(url):
+async def real_download(task_list):
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=downloadHeaders) as res:
-            if res.status == 200:
-                if os.path.exists(downloadDir):
-                    # noinspection PyBroadException
-                    try:
-                        async with aiofiles.open(downloadDir + url[url.rfind("/"):], "wb") as image:
-                            await image.write(await res.content.read())
-                    except:
-                        os.remove(downloadDir + url[url.rfind("/"):])
-                else:
-                    os.mkdir(downloadDir)
-                    async_download(downloadDir)
-            else:
-                print(str(res.status) + "!" + "Resource:" + url)
+        for task in task_list:
+            if task['image_type'] != 'manga':
+                header = {
+                    'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+                    'Accept-Encoding': 'gzip,deflate,br',
+                    'Connection': 'keep-alive',
+                    'Referer': 'https://pixivic.com/illusts/' + str(task['image_id']),
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML,like Gecko) Chrome/74.0.3729.131 Safari/537.36'
+                }
+                async with session.get(url := task['image_url'], headers=header) as response:
+                    if response.status == 200:
+                        if os.path.exists(downloadDir := os.path.abspath('.') + '/images'):
+                            # noinspection PyBroadException
+                            try:
+                                async with aiofiles.open(filePath := downloadDir + url[url.rfind('/'):], 'wb') as image:
+                                    await image.write(await response.content.read())
+                            except:
+                                os.remove(filePath)
+                        else:
+                            os.mkdir(downloadDir)
+                            await real_download(task_list)
+                    else:
+                        print(str(response.status) + "!" + "Resource:" + url)
     return
 
 
-def download(url):
-    d_r = requests.get(url, headers=downloadHeaders)
-    if d_r.status_code == 200:
-        if os.path.exists(downloadDir):
-            with open(downloadDir + url[url.rfind("/"):], "wb") as image:
-                image.write(d_r.content)
-        else:
-            os.mkdir(downloadDir)
-            download(downloadDir)
-    else:
-        print(str(d_r.status_code)+"!"+"Resource:"+url)
+def download(task_list):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(loop.create_task(real_download(task_list)))
+
+
+# Todo("Incomplete method")
+async def main(date, which_mode, page_v):
+    header = {
+        'Origin': 'https://pixivic.com',
+        'Referer': 'https://pixivic.com/?VNK=d2x231f3',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML,like Gecko) Chrome/74.0.3729.131 Safari/537.36'
+    }
+    api_url = "https://api.pixivic.com/ranks?page=" + str(page_v) + "&date=" + str(date) + "&mode=" + str(which_mode)+"&pageSize=90"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(api_url, headers=header) as response:
+            resource_json = await response.json()
+    image_list = get_image_info(resource_json)
+    size = len(image_list) // 5
+    for tasks in [image_list[i:i + size] for i in range(0, len(image_list), size)]:
+        multiprocessing.Process(target=download, args=(tasks,)).start()
     return
 
 
-def main(argv):
-    global date, async_mode
-    global mode
-    global pages
-    global downloadDir
+def format_date(year_v, month_v, day_v):
+    s_year = str(year_v)
+    s_month = str(month_v)
+    s_day = str(day_v)
+    if month_v < 10 and day_v < 10:
+        return s_year + "-0" + s_month + "-0" + s_day
+    elif month_v >= 10 and day_v >= 10:
+        return s_year + "-" + s_month + "-" + s_day
+    # If month less than 10,it will return True.So the True can cast to int type,it is usually 1.
+    # Because of the existence of the or operator,it will not compare the value of day.
+    # Also because I assembled the return value into a list,it will return the element with index 1.
+    # If month bigger than 10,it will return False.Because of the existence of the or operator,it will be compared whether the day value is less than 10 at this time.
+    # If the value of day is less than 10,he will return False because of the not operator,converted to int type is 0.It will return the elements with index 0.
+    return [s_year + "-" + s_month + "-0" + s_day, s_year + "-0" + s_month + "-" + s_day][
+        month_v < 10 or not day_v < 10]
+
+
+def auto_set_time():
+    local_day = datetime.datetime.today().day
+    local_month = datetime.datetime.today().month
+    local_year = datetime.datetime.today().year
+    local_day -= 3
+    if local_day <= 0:
+        local_month -= 1
+        if local_month <= 0:
+            local_year -= 1
+            local_month = 12
+            local_day += calendar.monthrange(local_year, local_month)[1]
+    return format_date(local_year, local_month, local_day)
+
+
+# Todo("Anything")
+def get_image_info(json):
+    data = json['data']
+    image_list = []
+    for image_message in data:
+        for url in image_message['imageUrls']:
+            if base_uri in (unprocessed_url := url['original']):
+                image_list.append({'image_id': image_message['id'], 'artist_id': image_message['artistId'],
+                                   'title': image_message['title'], 'image_type': image_message['type'],
+                                   'author': image_message['artistPreView']['name'],
+                                   'image_url': unprocessed_url.replace(base_uri, origin_uri)})
+                break
+    return image_list
+
+
+if __name__ == '__main__':
+    opts = None
+    day = None
+    month = None
+    year = None
+    mode = None
+    page = 1
     try:
-        opts, args = getopt.getopt(argv, "hd:m:p:", ["help", "date=", "mode=", "pages=", "dir=", "enable-async-io"])
-    except getopt.GetoptError:
-        print("Error:Invaild args.")
-        sys.exit()
+        opts, args = getopt.getopt(sys.argv[1:], "hd:m:y:p:", ["day=", "month=", "year=", "mode=", "pages="])
+    except getopt.GetoptError as e:
+        print(e.msg)
+        exit(1)
     for opt, arg in opts:
         if opt == "-h":
-            print("usage:<this file>.py -d <date> -m <mode> -p <pages> --dir <downloadDir> [--enable-async-io]")
-            sys.exit()
-        elif opt in ("-d", "--date"):
-            date = arg
-        elif opt in ("-m", "--mode"):
+            print('Usage:\n \
+    -h    Print this message.\n \
+    -d <value>   Set resource day.\n \
+    -m <value>   Set resource month.\n \
+    -y <value>   Set resource year.\n \
+    -p <value> Set get pages.\n \
+    --day=<value> See -d.\n \
+    --month=<value> See -m.\n \
+    --year=<value> See -y.\n \
+    --mode=<value> Set get resource mode.Value must is one of these:day,week,month.If check value failed,try to use default config.\n \
+    --pages=<value> See -p')
+            exit(0)
+        elif opt in ("-d", "--day"):
+            day = arg
+        elif opt in ("-m", "--month"):
+            month = arg
+        elif opt in ("-y", "--year"):
+            year = arg
+        elif opt in "--mode":
             mode = arg
-            if opt not in ("-d", "--date"):
-                AutoSetTime(mode)
         elif opt in ("-p", "--pages"):
-            pages = int(arg)
-        elif opt in "--dir":
-            downloadDir = arg
-        elif opt in "--enable-async-io":
-            async_mode = True
-    for page in range(1, pages + 1):
-        with ThreadPoolExecutor(5) as pool:
-            apiurl = "https://api.pixivic.com/ranks?page=" + str(page) + "&date=" + date + "&mode=" + mode
-            r = requests.get(apiurl, headers=headers)
-            r.encoding = 'utf-8'
-            tasks = []
-            real_DownloadURL_list=[]
-            real_FileName_list=[]
-            for datas in r.json()["data"]:
-                for i_data in datas["imageUrls"]:
-                    if base_uri in (image_URL := i_data["original"]):
-                        r_DownloadURL = image_URL.replace(base_uri, origin_uri)
-                        real_DownloadURL_list.append(r_DownloadURL)
-                        real_FileName_list.append(r_DownloadURL[r_DownloadURL.rfind("/") + 1:])
-
-            for index in range(len(real_DownloadURL_list)):
-                real_DownloadURL=real_DownloadURL_list[index]
-                real_FileName=real_FileName_list[index]
-                if not os.path.exists(downloadDir+"/"+str(real_FileName)):
-                    if async_mode:
-                        loop = asyncio.get_event_loop()
-                        tasks.append(pool.submit(loop.run_until_complete,loop.create_task(async_download(real_DownloadURL))))
-                        if index % 5 == 0:
-                            wait(tasks,return_when=ALL_COMPLETED)
-                            for i in range(0,5):
-                                real_DownloadURL_list[i]=None
-                                real_FileName_list[i]=None
-                    else:
-                        tasks.append(pool.submit(download,real_DownloadURL))
-                        if index % 5 == 0:
-                            wait(tasks,return_when=ALL_COMPLETED)
-                            for i in range(0,5):
-                                real_DownloadURL_list[i]=None
-                                real_FileName_list[i]=None
-                else:
-                    print("Find Resource:"+real_FileName)
-    print("Done!Please to check your set dir.")
-    print("Your dir:" + downloadDir)
-    return
-
-
-if __name__ == "__main__":
-    main(sys.argv[1:])
+            page = arg
+    loop = asyncio.get_event_loop()
+    for index in range(len(date_object_list := (day, month, year))):
+        if index == 2 and date_object_list[index] is None:
+            for enum in ModeEnum.__members__.values():
+                if mode == enum.value:
+                    break
+            else:
+                raise ValueError
+            loop.run_until_complete(main(auto_set_time(), mode, page))
+            break
+    else:
+        loop.run_until_complete(main(format_date(year, month, day), ModeEnum.DAY.value, page))
