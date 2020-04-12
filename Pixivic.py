@@ -48,19 +48,20 @@ async def real_download(task_list):
 
 
 def download(task_list):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(loop.create_task(real_download(task_list)))
+    new_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(new_loop)
+    new_loop.run_until_complete(new_loop.create_task(real_download(task_list)))
 
 
-# Todo("Incomplete method")
+# Todo('Make multi-page download work')
 async def main(date, which_mode, page_v):
     header = {
         'Origin': 'https://pixivic.com',
         'Referer': 'https://pixivic.com/?VNK=d2x231f3',
         'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML,like Gecko) Chrome/74.0.3729.131 Safari/537.36'
     }
-    api_url = "https://api.pixivic.com/ranks?page=" + str(page_v) + "&date=" + str(date) + "&mode=" + str(which_mode)+"&pageSize=90"
+    api_url = "https://api.pixivic.com/ranks?page=" + str(page_v) + "&date=" + str(date) + "&mode=" + str(
+        which_mode) + "&pageSize=90"
     async with aiohttp.ClientSession() as session:
         async with session.get(api_url, headers=header) as response:
             resource_json = await response.json()
@@ -79,13 +80,7 @@ def format_date(year_v, month_v, day_v):
         return s_year + "-0" + s_month + "-0" + s_day
     elif month_v >= 10 and day_v >= 10:
         return s_year + "-" + s_month + "-" + s_day
-    # If month less than 10,it will return True.So the True can cast to int type,it is usually 1.
-    # Because of the existence of the or operator,it will not compare the value of day.
-    # Also because I assembled the return value into a list,it will return the element with index 1.
-    # If month bigger than 10,it will return False.Because of the existence of the or operator,it will be compared whether the day value is less than 10 at this time.
-    # If the value of day is less than 10,he will return False because of the not operator,converted to int type is 0.It will return the elements with index 0.
-    return [s_year + "-" + s_month + "-0" + s_day, s_year + "-0" + s_month + "-" + s_day][
-        month_v < 10 or not day_v < 10]
+    return [s_year + "-" + s_month + "-0" + s_day, s_year + "-0" + s_month + "-" + s_day][month_v < 10 or not day_v < 10]
 
 
 def auto_set_time():
@@ -102,7 +97,6 @@ def auto_set_time():
     return format_date(local_year, local_month, local_day)
 
 
-# Todo("Anything")
 def get_image_info(json):
     data = json['data']
     image_list = []
@@ -123,9 +117,14 @@ if __name__ == '__main__':
     month = None
     year = None
     mode = None
+    start = None
+    stop = None
+    isAutoSetTime = True
+    UseDefaultMode = True
     page = 1
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hd:m:y:p:", ["day=", "month=", "year=", "mode=", "pages="])
+        opts, args = getopt.getopt(sys.argv[1:], "hd:m:y:p:",
+                                   ["day=", "month=", "year=", "mode=", "pages=", "start=", "stop="])
     except getopt.GetoptError as e:
         print(e.msg)
         exit(1)
@@ -136,32 +135,47 @@ if __name__ == '__main__':
     -d <value>   Set resource day.\n \
     -m <value>   Set resource month.\n \
     -y <value>   Set resource year.\n \
-    -p <value> Set get pages.\n \
+    -p <value> Set resource page.\n \
     --day=<value> See -d.\n \
     --month=<value> See -m.\n \
     --year=<value> See -y.\n \
     --mode=<value> Set get resource mode.Value must is one of these:day,week,month.If check value failed,try to use default config.\n \
-    --pages=<value> See -p')
+    --page=<value> See -p \
+    --start=<value> Set the page to start downloading \
+    --stop=<value> Set the page to stop downloading')
             exit(0)
         elif opt in ("-d", "--day"):
             day = arg
+            isAutoSetTime = False
         elif opt in ("-m", "--month"):
             month = arg
+            isAutoSetTime = False
         elif opt in ("-y", "--year"):
             year = arg
+            isAutoSetTime = False
         elif opt in "--mode":
             mode = arg
+            UseDefaultMode = False
         elif opt in ("-p", "--pages"):
             page = arg
+        elif opt in '--start':
+            start = arg
+        elif opt in '--stop':
+            stop = arg
     loop = asyncio.get_event_loop()
-    for index in range(len(date_object_list := (day, month, year))):
-        if index == 2 and date_object_list[index] is None:
+    for date_object in (day, month, year):
+        if not isAutoSetTime and date_object is None:
+            raise ValueError("Date is invalid.")
+        else:
             for enum in ModeEnum.__members__.values():
                 if mode == enum.value:
                     break
             else:
-                raise ValueError
+                if UseDefaultMode:
+                    mode = ModeEnum.DAY.value
+                else:
+                    raise ValueError('Mode is invalid.')
             loop.run_until_complete(main(auto_set_time(), mode, page))
             break
     else:
-        loop.run_until_complete(main(format_date(year, month, day), ModeEnum.DAY.value, page))
+        loop.run_until_complete(main(format_date(year, month, day), mode, page))
