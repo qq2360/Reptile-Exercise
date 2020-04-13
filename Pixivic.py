@@ -51,25 +51,45 @@ def download(task_list):
     new_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(new_loop)
     new_loop.run_until_complete(new_loop.create_task(real_download(task_list)))
+    return
 
 
-# Todo('Make multi-page download work')
-async def main(date, which_mode, page_v):
+async def main(date, which_mode, page_v, where_start, where_stop):
+    where_start = int(where_start)
+    where_stop = int(where_stop)
+    image_list = []
     header = {
         'Origin': 'https://pixivic.com',
         'Referer': 'https://pixivic.com/?VNK=d2x231f3',
         'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML,like Gecko) Chrome/74.0.3729.131 Safari/537.36'
     }
+    if not (where_start is None or where_stop is None):
+        if where_start <= 0 or where_stop <= 0:
+            raise ValueError("Invalid start/stop index.")
+        for next_page in range(where_start, where_stop + 1):
+            tmp_list = get_image_info(await get_resource_json(date, which_mode, next_page, header))
+            if not tmp_list:
+                print("the last page is "+str(next_page))
+                break
+            image_list += tmp_list
+        size = len(image_list) // 5
+        for tasks in [image_list[i:i + size] for i in range(0, len(image_list), size)]:
+            multiprocessing.Process(target=download, args=(tasks,)).start()
+    else:
+        image_list = get_image_info(await get_resource_json(date, which_mode, page_v, header))
+        size = len(image_list) // 5
+        for tasks in [image_list[i:i + size] for i in range(0, len(image_list), size)]:
+            multiprocessing.Process(target=download, args=(tasks,)).start()
+    return
+
+
+async def get_resource_json(date, which_mode, page_v, header):
     api_url = "https://api.pixivic.com/ranks?page=" + str(page_v) + "&date=" + str(date) + "&mode=" + str(
         which_mode) + "&pageSize=90"
     async with aiohttp.ClientSession() as session:
         async with session.get(api_url, headers=header) as response:
             resource_json = await response.json()
-    image_list = get_image_info(resource_json)
-    size = len(image_list) // 5
-    for tasks in [image_list[i:i + size] for i in range(0, len(image_list), size)]:
-        multiprocessing.Process(target=download, args=(tasks,)).start()
-    return
+    return resource_json
 
 
 def format_date(year_v, month_v, day_v):
@@ -80,7 +100,8 @@ def format_date(year_v, month_v, day_v):
         return s_year + "-0" + s_month + "-0" + s_day
     elif month_v >= 10 and day_v >= 10:
         return s_year + "-" + s_month + "-" + s_day
-    return [s_year + "-" + s_month + "-0" + s_day, s_year + "-0" + s_month + "-" + s_day][month_v < 10 or not day_v < 10]
+    return [s_year + "-" + s_month + "-0" + s_day, s_year + "-0" + s_month + "-" + s_day][
+        month_v < 10 or not day_v < 10]
 
 
 def auto_set_time():
@@ -98,7 +119,10 @@ def auto_set_time():
 
 
 def get_image_info(json):
-    data = json['data']
+    try:
+        data = json['data']
+    except KeyError:
+        return []
     image_list = []
     for image_message in data:
         for url in image_message['imageUrls']:
@@ -175,7 +199,7 @@ if __name__ == '__main__':
                     mode = ModeEnum.DAY.value
                 else:
                     raise ValueError('Mode is invalid.')
-            loop.run_until_complete(main(auto_set_time(), mode, page))
+            loop.run_until_complete(main(auto_set_time(), mode, page, start, stop))
             break
     else:
-        loop.run_until_complete(main(format_date(year, month, day), mode, page))
+        loop.run_until_complete(main(format_date(year, month, day), mode, page, start, stop))
