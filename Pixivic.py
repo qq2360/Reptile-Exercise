@@ -121,7 +121,7 @@ async def get_resource_json(is_search_mode, search_name, date, which_mode, page_
                     print(await response.text('utf-8'))
                     raise RuntimeError("API Request code:" + str(code))
                 m_resource_json = await m_response.json()
-    return dict(resource_json, **m_resource_json)
+    return [resource_json, m_resource_json]
 
 
 def format_date(year_v, month_v, day_v):
@@ -151,28 +151,30 @@ def auto_set_time():
 
 
 def get_image_info(json):
-    try:
-        data = json['data']
-    except KeyError:
-        print("The last page has been reached.")
-        return []
     image_list = []
-    for image_message in data:
-        for url in image_message['imageUrls']:
-            if base_uri in (unprocessed_url := url['original']):
-                if include_manga:
-                    image_list.append({'image_id': image_message['id'], 'artist_id': image_message['artistId'],
-                                       'title': image_message['title'], 'image_type': image_message['type'],
-                                       'author': (author['name'] if (author := image_message['artistPreView']) is not None else "None"),
-                                       'image_url': unprocessed_url.replace(base_uri, origin_uri)})
-                else:
-                    if i_type := image_message['type'] == "mange":
-                        continue
-                    image_list.append({'image_id': image_message['id'], 'artist_id': image_message['artistId'],
-                                       'title': image_message['title'], 'image_type': i_type,
-                                       'author': (author['name'] if (author := image_message['artistPreView']) is not None else "None"),
-                                       'image_url': unprocessed_url.replace(base_uri, origin_uri)})
-                break
+    for p_json in json:
+        try:
+            data = p_json['data']
+        except KeyError:
+            print("The last page has been reached.")
+            return []
+        for image_message in data:
+            for url in image_message['imageUrls']:
+                if base_uri in (unprocessed_url := url['original']):
+                    if include_manga:
+                        image_list.append({'image_id': image_message['id'], 'artist_id': image_message['artistId'],
+                                           'title': image_message['title'], 'image_type': image_message['type'],
+                                           'author': (author['name'] if (author := image_message[
+                                               'artistPreView']) is not None else "None"),
+                                           'image_url': unprocessed_url.replace(base_uri, origin_uri)})
+                    else:
+                        if i_type := image_message['type'] == "mange":
+                            continue
+                        image_list.append({'image_id': image_message['id'], 'artist_id': image_message['artistId'],
+                                           'title': image_message['title'], 'image_type': i_type,
+                                           'author': (author['name'] if (author := image_message[
+                                               'artistPreView']) is not None else "None"),
+                                           'image_url': unprocessed_url.replace(base_uri, origin_uri)})
     return image_list
 
 
