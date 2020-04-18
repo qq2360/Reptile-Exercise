@@ -12,6 +12,9 @@ from enum import Enum
 base_uri = 'https://i.pximg.net'
 origin_uri = 'https://original.img.cheerfun.dev'
 
+enable_r18 = False
+include_manga = False
+
 
 class ModeEnum(Enum):
     DAY = "day"
@@ -22,29 +25,28 @@ class ModeEnum(Enum):
 async def real_download(task_list):
     async with aiohttp.ClientSession() as session:
         for task in task_list:
-            if task['image_type'] != 'manga':
-                header = {
-                    'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
-                    'Accept-Encoding': 'gzip,deflate,br',
-                    'Connection': 'keep-alive',
-                    'Referer': 'https://pixivic.com/illusts/' + str(task['image_id']),
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML,like Gecko) Chrome/74.0.3729.131 Safari/537.36'
-                }
-                async with session.get(url := task['image_url'], headers=header) as response:
-                    if response.status == 200:
-                        if os.path.exists(downloadDir := os.path.abspath('.') + '/images'):
-                            # noinspection PyBroadException
-                            try:
-                                async with aiofiles.open(filePath := downloadDir + url[url.rfind('/'):], 'wb') as image:
-                                    await image.write(await response.content.read())
-                            except:
-                                os.remove(filePath)
-                                print("Unable to download file or write file to disk.Path:" + filePath)
-                        else:
-                            os.mkdir(downloadDir)
-                            await real_download(task_list)
+            header = {
+                'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+                'Accept-Encoding': 'gzip,deflate,br',
+                'Connection': 'keep-alive',
+                'Referer': 'https://pixivic.com/illusts/' + str(task['image_id']),
+                'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML,like Gecko) Chrome/74.0.3729.131 Safari/537.36'
+            }
+            async with session.get(url := task['image_url'], headers=header) as response:
+                if response.status == 200:
+                    if os.path.exists(downloadDir := os.path.abspath('.') + '/images'):
+                        # noinspection PyBroadException
+                        try:
+                            async with aiofiles.open(filePath := downloadDir + url[url.rfind('/'):], 'wb') as image:
+                                await image.write(await response.content.read())
+                        except:
+                            os.remove(filePath)
+                            print("Unable to download file or write file to disk.Path:" + filePath)
                     else:
-                        print(str(response.status) + "!" + "Resource:" + url)
+                        os.mkdir(downloadDir)
+                        await real_download(task_list)
+                else:
+                    print(str(response.status) + "!" + "Resource:" + url)
     return
 
 
@@ -55,12 +57,13 @@ def download(task_list):
     return
 
 
+# Todo(Let r18 work)
 async def main(is_search_mode, search_name, date, which_mode, page_v, where_start, where_stop):
     image_list = []
     if is_search_mode:
         header = {
             'Origin': 'https://pixivic.com',
-            'Referer': 'https://pixivic.com/keywords?tag='+search_name+'&illustType=illust',
+            'Referer': 'https://pixivic.com/keywords?tag=' + search_name + '&illustType=illust',
             'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML,like Gecko) Chrome/74.0.3729.131 Safari/537.36'
         }
     else:
@@ -94,18 +97,31 @@ async def main(is_search_mode, search_name, date, which_mode, page_v, where_star
 
 
 async def get_resource_json(is_search_mode, search_name, date, which_mode, page_v, header):
+    m_api_url = ''
     if is_search_mode:
         api_url = "https://api.pixivic.com/illustrations?illustType=illust&searchType=original&maxSanityLevel=6&page=" + str(
-            page_v) + "&keyword=" + search_name + "&pageSize=30"
+            page_v) + "&keyword=" + search_name + "&pageSize=30" + ("&xRestrict=1" if enable_r18 else "")
+        if include_manga:
+            m_api_url = "https://api.pixivic.com/illustrations?illustType=manga&searchType=original&maxSanityLevel=6&page=" + str(
+                page_v) + "&keyword=" + search_name + "&pageSize=30" + ("&xRestrict=1" if enable_r18 else "")
     else:
         api_url = "https://api.pixivic.com/ranks?page=" + str(page_v) + "&date=" + str(date) + "&mode=" + str(
             which_mode) + "&pageSize=30"
     async with aiohttp.ClientSession() as session:
         async with session.get(api_url, headers=header) as response:
-            if not (code:=response.status) == 200:
+            if not (code := response.status) == 200:
+                print(api_url)
+                print(await response.text('utf-8'))
                 raise RuntimeError("API Request code:" + str(code))
             resource_json = await response.json()
-    return resource_json
+        if include_manga:
+            async with session.get(m_api_url, headers=header) as m_response:
+                if not (code := response.status) == 200:
+                    print(api_url)
+                    print(await response.text('utf-8'))
+                    raise RuntimeError("API Request code:" + str(code))
+                m_resource_json = await m_response.json()
+    return dict(resource_json, **m_resource_json)
 
 
 def format_date(year_v, month_v, day_v):
@@ -144,10 +160,18 @@ def get_image_info(json):
     for image_message in data:
         for url in image_message['imageUrls']:
             if base_uri in (unprocessed_url := url['original']):
-                image_list.append({'image_id': image_message['id'], 'artist_id': image_message['artistId'],
-                                   'title': image_message['title'], 'image_type': image_message['type'],
-                                   'author': image_message['artistPreView']['name'],
-                                   'image_url': unprocessed_url.replace(base_uri, origin_uri)})
+                if include_manga:
+                    image_list.append({'image_id': image_message['id'], 'artist_id': image_message['artistId'],
+                                       'title': image_message['title'], 'image_type': image_message['type'],
+                                       'author': (author['name'] if (author := image_message['artistPreView']) is not None else "None"),
+                                       'image_url': unprocessed_url.replace(base_uri, origin_uri)})
+                else:
+                    if i_type := image_message['type'] == "mange":
+                        continue
+                    image_list.append({'image_id': image_message['id'], 'artist_id': image_message['artistId'],
+                                       'title': image_message['title'], 'image_type': i_type,
+                                       'author': (author['name'] if (author := image_message['artistPreView']) is not None else "None"),
+                                       'image_url': unprocessed_url.replace(base_uri, origin_uri)})
                 break
     return image_list
 
@@ -167,7 +191,8 @@ if __name__ == '__main__':
     page = 1
     try:
         opts, args = getopt.getopt(sys.argv[1:], "hd:m:y:p:",
-                                   ["day=", "month=", "year=", "mode=", "pages=", "start=", "stop=", 'search='])
+                                   ["day=", "month=", "year=", "mode=", "pages=", "start=", "stop=", 'search=',
+                                    'enable-r18', 'include-manga'])
     except getopt.GetoptError as e:
         print(e.msg)
         exit(1)
@@ -186,7 +211,9 @@ if __name__ == '__main__':
     --page=<value>      See -p\n \
     --start=<value>     Set the page to start downloading\n \
     --stop=<value>      Set the page to stop downloading\n \
-    --search=<value>    Set the resource file you want to search.')
+    --search=<value>    Set the resource file you want to search.\n \
+    --enable-r18        Enable r18 data.\n \
+    --include-manga     Include manga in to resource list.')
             exit(0)
         elif opt in ("-d", "--day"):
             day = arg
@@ -209,6 +236,10 @@ if __name__ == '__main__':
         elif opt in '--search':
             search = arg
             isSearchMode = True
+        elif opt in "--enable-r18":
+            enable_r18 = True
+        elif opt in "--include-manga":
+            include_manga = True
     loop = asyncio.get_event_loop()
     for date_object in (day, month, year):
         if not isAutoSetTime and date_object is None:
