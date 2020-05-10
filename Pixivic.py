@@ -30,12 +30,12 @@ async def real_download(task_list):
                 'Accept-Encoding': 'gzip,deflate,br',
                 'Connection': 'keep-alive',
                 'Referer': 'https://pixivic.com/illusts/' + str(task['image_id']),
-                'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML,like Gecko) Chrome/74.0.3729.131 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML,like Gecko) '
+                              'Chrome/74.0.3729.131 Safari/537.36 '
             }
             async with session.get(url := task['image_url'], headers=header) as response:
                 if response.status == 200:
                     if os.path.exists(downloadDir := os.path.abspath('.') + '/images'):
-                        # noinspection PyBroadException
                         try:
                             async with aiofiles.open(filePath := downloadDir + url[url.rfind('/'):], 'wb') as image:
                                 await image.write(await response.content.read())
@@ -64,13 +64,15 @@ async def main(is_search_mode, search_name, date, which_mode, page_v, where_star
         header = {
             'Origin': 'https://pixivic.com',
             'Referer': 'https://pixivic.com/keywords?tag=' + search_name + '&illustType=illust',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML,like Gecko) Chrome/74.0.3729.131 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML,like Gecko) Chrome/74.0.3729.131 '
+                          'Safari/537.36 '
         }
     else:
         header = {
             'Origin': 'https://pixivic.com',
             'Referer': 'https://pixivic.com/?VNK=d2x231f3',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML,like Gecko) Chrome/74.0.3729.131 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/537.36 (KHTML,like Gecko) Chrome/74.0.3729.131 '
+                          'Safari/537.36 '
         }
     if not (where_start is None or where_stop is None):
         where_start = int(where_start)
@@ -99,11 +101,15 @@ async def main(is_search_mode, search_name, date, which_mode, page_v, where_star
 async def get_resource_json(is_search_mode, search_name, date, which_mode, page_v, header):
     m_api_url = ''
     if is_search_mode:
-        api_url = "https://api.pixivic.com/illustrations?illustType=illust&searchType=original&maxSanityLevel=6&page=" + str(
-            page_v) + "&keyword=" + search_name + "&pageSize=30" + ("&xRestrict=1" if enable_r18 else "")
+        api_url = "https://api.pixivic.com/illustrations?"\
+                  "illustType=illust&searchType=original&maxSanityLevel=6&page=" + str(page_v) + \
+                  "&keyword=" + search_name + \
+                  "&pageSize=30" + ("&xRestrict=1" if enable_r18 else "")
         if include_manga:
-            m_api_url = "https://api.pixivic.com/illustrations?illustType=manga&searchType=original&maxSanityLevel=6&page=" + str(
-                page_v) + "&keyword=" + search_name + "&pageSize=30" + ("&xRestrict=1" if enable_r18 else "")
+            m_api_url = "https://api.pixivic.com/illustrations?"\
+                        "illustType=manga&searchType=original&maxSanityLevel=6&page=" + str(page_v) + \
+                        "&keyword=" + search_name + \
+                        "&pageSize=30" + ("&xRestrict=1" if enable_r18 else "")
     else:
         api_url = "https://api.pixivic.com/ranks?page=" + str(page_v) + "&date=" + str(date) + "&mode=" + str(
             which_mode) + "&pageSize=30"
@@ -209,7 +215,8 @@ if __name__ == '__main__':
     --day=<value>       See -d.\n \
     --month=<value>     See -m.\n \
     --year=<value>      See -y.\n \
-    --mode=<value>      Set get resource mode.Value must is one of these:day,week,month.If check value failed,it will raise a ValueError.\n \
+    --mode=<value>      Set get resource mode.Value must is one of these:day,week,month.\n \
+                        If check value failed,it will raise a ValueError.\n \
     --page=<value>      See -p\n \
     --start=<value>     Set the page to start downloading\n \
     --stop=<value>      Set the page to stop downloading\n \
