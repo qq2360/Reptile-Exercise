@@ -10,7 +10,7 @@ import multiprocessing
 from enum import Enum
 
 base_uri = 'https://i.pximg.net'
-origin_uri = 'https://original.img.cheerfun.dev'
+origin_uri = 'https://img.cheerfun.dev'
 
 
 class ModeEnum(Enum):
@@ -130,7 +130,7 @@ def auto_set_time():
         if local_month <= 0:
             local_year -= 1
             local_month = 12
-            local_day += calendar.monthrange(local_year, local_month)[1]
+        local_day += calendar.monthrange(local_year, local_month)[1]
     return format_date(local_year, local_month, local_day)
 
 
