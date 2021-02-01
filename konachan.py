@@ -5,7 +5,7 @@ import re
 import asyncio
 import os
 import importlib
-from urllib.request import urlopen
+from urllib.request import *
 
 
 def check_and_load_lib(libname: str):
@@ -17,7 +17,7 @@ def check_and_load_lib(libname: str):
             print("Unable to download {} library.".format(libname))
             exit(0)
         else:
-            check_and_load_lib(libname)
+            return check_and_load_lib(libname)
 
 
 BeautifulSoup = getattr(check_and_load_lib("bs4"), "BeautifulSoup")
@@ -47,18 +47,22 @@ async def download(tasks: list, save_dir: str):
 def cli(search):
     loop = asyncio.get_event_loop()
     messages = []
-    html = urlopen("https://konachan.net/post?tags={}".format(search)).read().decode('utf-8')
-    soup = BeautifulSoup(html, 'lxml')
-    for content in soup.find_all("a", class_="directlink largeimg"):
-        messages.append(content['href'])
-    messages_size = len(messages)
-    if messages_size != 0:
-        every_thread_count = len(messages) // 2
-        tasks = [messages[i:i + every_thread_count] for i in range(0, len(messages), every_thread_count)]
-        loop.run_until_complete(
-            asyncio.wait(map(lambda task: asyncio.ensure_future(download(task, "illustrations")), tasks)))
-    else:
-        print("Not found any illustration.")
+    try:
+        html = urlopen("https://konachan.net/post?tags={}".format(search)).read().decode('utf-8')
+        # soup = BeautifulSoup(html, 'lxml')  # Use lxml to analyze html content
+        soup = BeautifulSoup(html, "html.parser")  # Use python3 implementation
+        for content in soup.find_all("a", class_="directlink largeimg"):
+            messages.append(content['href'])
+        messages_size = len(messages)
+        if messages_size != 0:
+            every_thread_count = len(messages) // 2
+            tasks = [messages[i:i + every_thread_count] for i in range(0, len(messages), every_thread_count)]
+            loop.run_until_complete(
+                asyncio.wait(map(lambda task: asyncio.ensure_future(download(task, "illustrations")), tasks)))
+        else:
+            print("Not found any illustration.")
+    except TimeoutError:
+        print("Time out!")
 
 
 if __name__ == "__main__":
