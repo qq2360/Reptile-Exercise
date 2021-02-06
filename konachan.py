@@ -1,20 +1,34 @@
-# from bs4 import BeautifulSoup //Only dev environment
-# import click //Only dev environment
-# import aiohttp //Only dev environment
+##
+#
+#   author: QaBns(github account:qq2360)
+#   date: 2021.02.06
+#   description:This script allows you to download the illustrations on konachan automatically.
+#               Please be careful not to use the script for illegal purposes.
+#               Otherwise, all consequences will be borne by the illegal users.
+#
+##
+
+# from bs4 import BeautifulSoup #Only dev environment
+# import click #Only dev environment
+# import aiohttp #Only dev environment
 import re
 import asyncio
 import os
 import importlib
-from urllib.request import *
+import hashlib
+from itertools import chain
+from urllib.request import urlopen, Request
+from sys import version_info
 
 
+# ToDo("修复可能存在的隐性bug，linux下可能有，而windows无法重现。。。。。。。")
 def check_and_load_lib(libname: str):
     try:
         return importlib.import_module(libname)
     except ImportError:
-        print("Unable to find {} library.Installing...".format(libname))
+        print(f"Unable to find {libname} library.Installing...")
         if os.system("pip install {}".format(libname if libname != "bs4" else "beautifulsoup4")) != 0:
-            print("Unable to download {} library.".format(libname))
+            print(f"Unable to download {libname} library.")
             exit(0)
         else:
             return check_and_load_lib(libname)
@@ -25,46 +39,89 @@ click = check_and_load_lib("click")
 aiohttp = check_and_load_lib("aiohttp")
 
 
+def md5_check(path, bytes):
+    file_md5_obj = hashlib.md5()
+    with open(path, "rb") as f:
+        while True:
+            data = f.read(128*1024)
+            if not data:
+                break
+            file_md5_obj.update(data)
+    file_md5 = file_md5_obj.hexdigest()
+    bytes_md5 = hashlib.md5(bytes).hexdigest()
+    return file_md5 == bytes_md5
+
+
 async def download(tasks: list, save_dir: str):
+    file_path = None
     pattern = re.compile(r"[A-Z]\w.*")
-    async with aiohttp.ClientSession() as session:
-        for task in tasks:
-            async with session.get(task) as request:
-                file_path = "{}/{}".format(save_dir, re.search(pattern, task).group())
-                if request.status != 200:
-                    print("[Debug] Http status code isn't 200!This is a problem.")
-                    continue
-                if not os.path.exists(save_dir):
-                    os.mkdir(save_dir)
-                elif not os.path.exists(file_path):
-                    with open(file_path, "wb") as stream:
-                        stream.write(await request.content.read())
-
-
-# ToDo("Make the multi-page download work.")
-@click.command()
-@click.option('--search', default="", help='Search name(or tag).')
-def cli(search):
-    loop = asyncio.get_event_loop()
-    messages = []
     try:
-        html = urlopen("https://konachan.net/post?tags={}".format(search)).read().decode('utf-8')
+        async with aiohttp.ClientSession() as session:
+            for task in tasks:
+                async with session.get(task) as request:
+                    file_path = f"{save_dir}/{re.search(pattern,task).group()}"
+                    if request.status != 200:
+                        print(
+                            "[Debug] Http status code isn't 200!This is a problem.")
+                        continue
+                    if not os.path.exists(save_dir):
+                        os.mkdir(save_dir)
+                    byte_array = await request.content.read()
+                    if not os.path.exists(file_path) or not md5_check(file_path, byte_array):
+                        with open(file_path, "wb") as stream:
+                            stream.write(byte_array)
+    except aiohttp.ClientError as error:
+        print("aiohttp client error:", error)
+    except asyncio.exceptions.TimeoutError:
+        print(
+            f"Connect time out!File path:{file_path}.The file will be remove...")
+        os.remove(file_path)
+
+
+def analyze_html_page(search: str, page: int):
+    header = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:85.0) Gecko/20100101 Firefox/85.0"
+    }
+    try:
+        html = urlopen(Request(
+            f"https://konachan.net/post?page={page}&tags={search}", headers=header)).read().decode('utf-8')
         # soup = BeautifulSoup(html, 'lxml')  # Use lxml to analyze html content
         soup = BeautifulSoup(html, "html.parser")  # Use python3 implementation
-        for content in soup.find_all("a", class_="directlink largeimg"):
-            messages.append(content['href'])
-        messages_size = len(messages)
-        if messages_size != 0:
-            every_thread_count = len(messages) // 2
-            tasks = [messages[i:i + every_thread_count] for i in range(0, len(messages), every_thread_count)]
-            loop.run_until_complete(
-                asyncio.wait(map(lambda task: asyncio.ensure_future(download(task, "illustrations")), tasks)))
-        else:
-            print("Not found any illustration.")
-    except TimeoutError:
-        print("Time out!")
+        return map(lambda content: content['href'], soup.find_all("a", class_="directlink largeimg"))
+    except:
+        raise RuntimeError("Have a error during analyze html process.")
+
+
+def check_int_arg(ctx, parma, value):
+    if value <= 0:
+        raise click.BadParameter(
+            "The value of this parameter must be greater than 0")
+    return value
+
+
+@click.command()
+@click.option('--search', type=str, default="", help='Search name(or tag).(Use English!!!)')
+@click.option('--from-start', type=int, default="1", help='Which page start?', callback=check_int_arg)
+@click.option('--stop-at', type=int, default="1", help='Which page stop?', callback=check_int_arg)
+def cli(search, from_start, stop_at):
+    loop = asyncio.get_event_loop()
+    messages = list(chain(*[analyze_html_page(search, page)
+                            for page in range(from_start, stop_at + 1)]))
+    messages_size = len(messages)
+    if messages_size != 0:
+        every_task_count = messages_size // 2
+        tasks = [messages[i:i + every_task_count]
+                 for i in range(0, messages_size, every_task_count)]
+        loop.run_until_complete(
+            asyncio.wait(map(lambda task: asyncio.ensure_future(
+                download(task, "illustrations")), tasks))
+        )
+    else:
+        print("Not found any illustration.")
 
 
 if __name__ == "__main__":
-    cli(None)  # 动态语言的通病，IDE不能准确识别对象的类型
+    if version_info.major != 3 or version_info.minor < 7:
+        raise RuntimeError("Please use Python 3.7 or later.")
+    cli(None, None, None)
     pass
