@@ -1,27 +1,25 @@
 ##
 #
 #   author: QaBns(github account:qq2360)
-#   date: 2021.02.06
+#   date: 2022.01.30
 #   description:This script allows you to download the illustrations on konachan automatically.
 #               Please be careful not to use the script for illegal purposes.
 #               Otherwise, all consequences will be borne by the illegal users.
 #
 ##
 
-# from bs4 import BeautifulSoup #Only dev environment
-# import click #Only dev environment
-# import aiohttp #Only dev environment
 import re
 import asyncio
 import os
 import importlib
 import hashlib
+import warnings
 from itertools import chain
 from urllib.request import urlopen, Request
 from sys import version_info
+from io import BytesIO
 
 
-# ToDo("修复可能存在的隐性bug，linux下可能有，而windows无法重现。。。。。。。")
 def check_and_load_lib(libname: str):
     try:
         return importlib.import_module(libname)
@@ -31,15 +29,16 @@ def check_and_load_lib(libname: str):
             print(f"Unable to download {libname} library.")
             exit(0)
         else:
-            return check_and_load_lib(libname)
+            return importlib.reload(libname)
 
 
 BeautifulSoup = getattr(check_and_load_lib("bs4"), "BeautifulSoup")
 click = check_and_load_lib("click")
 aiohttp = check_and_load_lib("aiohttp")
-
+UseLegacyCheck = False
 
 def md5_check(path, bytes):
+    warnings.warn("The legacy md5 check is deprecated.",DeprecationWarning)
     file_md5_obj = hashlib.md5()
     with open(path, "rb") as f:
         while True:
@@ -52,6 +51,26 @@ def md5_check(path, bytes):
     return file_md5 == bytes_md5
 
 
+def dHash_check(path,bytes):
+    from PIL import Image
+    import numpy as np
+    def compare(image):
+        different = []
+        for i in range(8):
+            for pixel in range(8):
+                different.append(image[i,pixel] > image[i,pixel+1])
+        return different
+    
+    image = Image.open(path)
+    remote_image = Image.open(BytesIO(bytes))
+    image = np.array(image.resize((9,8),Image.ANTIALIAS).convert('L'),'f')
+    remote_image = np.array(remote_image.resize((9,8),Image.ANTIALIAS).convert('L'),'f')
+    hash1 = compare(image)
+    hash2 = compare(remote_image)
+    dist = sum([a != b for a,b in zip(hash1,hash2)])
+    similarity = 1 - dist * 1.0 / 64
+    return similarity
+    
 async def download(tasks: list, save_dir: str):
     file_path = None
     pattern = re.compile(r"[A-Z]\w.*")
@@ -67,9 +86,10 @@ async def download(tasks: list, save_dir: str):
                     if not os.path.exists(save_dir):
                         os.mkdir(save_dir)
                     byte_array = await request.content.read()
-                    if not os.path.exists(file_path) or not md5_check(file_path, byte_array):
+                    if not os.path.exists(file_path) or not (md5_check(file_path,byte_array) if UseLegacyCheck else dHash_check(file_path, byte_array)):
                         with open(file_path, "wb") as stream:
                             stream.write(byte_array)
+                    print(f"Download {task} is done!")
     except aiohttp.ClientError as error:
         print("aiohttp client error:", error)
     except asyncio.exceptions.TimeoutError:
@@ -103,8 +123,12 @@ def check_int_arg(ctx, parma, value):
 @click.option('--search', type=str, default="", help='Search name(or tag).(Use English!!!)')
 @click.option('--from-start', type=int, default="1", help='Which page start?', callback=check_int_arg)
 @click.option('--stop-at', type=int, default="1", help='Which page stop?', callback=check_int_arg)
-def cli(search, from_start, stop_at):
-    loop = asyncio.get_event_loop()
+@click.option('--use-legacy-check',type=bool,default=False,help='Use the legacy check.')
+def cli(search, from_start, stop_at,use_legacy_check):
+    global UseLegacyCheck
+    UseLegacyCheck = use_legacy_check
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     messages = list(chain(*[analyze_html_page(search, page)
                             for page in range(from_start, stop_at + 1)]))
     messages_size = len(messages)
@@ -113,9 +137,10 @@ def cli(search, from_start, stop_at):
         tasks = [messages[i:i + every_task_count]
                  for i in range(0, messages_size, every_task_count)]
         loop.run_until_complete(
-            asyncio.wait(map(lambda task: asyncio.ensure_future(
-                download(task, "illustrations")), tasks))
+                asyncio.gather(*(map(lambda task: asyncio.ensure_future(
+                    download(task, "illustrations"),loop=loop), tasks)))
         )
+        print("Everything is ok!")
     else:
         print("Not found any illustration.")
 
