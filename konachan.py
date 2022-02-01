@@ -20,22 +20,30 @@ from sys import version_info
 from io import BytesIO
 
 
+NeedRestart = False
+
+
 def check_and_load_lib(libname: str):
+    global NeedRestart
     try:
         return importlib.import_module(libname)
     except ImportError:
+        NeedRestart = True
         print(f"Unable to find {libname} library.Installing...")
         if os.system("pip install {}".format(libname if libname != "bs4" else "beautifulsoup4")) != 0:
             print(f"Unable to download {libname} library.")
             exit(0)
         else:
-            return importlib.reload(libname)
+            return check_and_load_lib(libname)
 
 
 BeautifulSoup = getattr(check_and_load_lib("bs4"), "BeautifulSoup")
 click = check_and_load_lib("click")
 aiohttp = check_and_load_lib("aiohttp")
+
+
 UseLegacyCheck = False
+
 
 def md5_check(path, bytes):
     warnings.warn("The legacy md5 check is deprecated.",DeprecationWarning)
@@ -54,10 +62,9 @@ def md5_check(path, bytes):
 def dHash_check(path,bytes):
     from PIL import Image
     import numpy as np
-    def compare(image):
+    def get_diff(image):
         different = []
-        for i in range(8):
-            for pixel in range(8):
+        for i,pixel in zip(range(8),range(8)):
                 different.append(image[i,pixel] > image[i,pixel+1])
         return different
     
@@ -65,13 +72,22 @@ def dHash_check(path,bytes):
     remote_image = Image.open(BytesIO(bytes))
     image = np.array(image.resize((9,8),Image.ANTIALIAS).convert('L'),'f')
     remote_image = np.array(remote_image.resize((9,8),Image.ANTIALIAS).convert('L'),'f')
-    hash1 = compare(image)
-    hash2 = compare(remote_image)
+    hash1 = get_diff(image)
+    hash2 = get_diff(remote_image)
     dist = sum([a != b for a,b in zip(hash1,hash2)])
-    similarity = 1 - dist * 1.0 / 64
-    return similarity
-    
+    return dist < 5
+
+
+SuccessCount = 0
+SkipCount = 0
+ErrorCount = 0
+
+
 async def download(tasks: list, save_dir: str):
+    global UseLegacyCheck
+    global SuccessCount
+    global SkipCount
+    global ErrorCount
     file_path = None
     pattern = re.compile(r"[A-Z]\w.*")
     try:
@@ -89,13 +105,19 @@ async def download(tasks: list, save_dir: str):
                     if not os.path.exists(file_path) or not (md5_check(file_path,byte_array) if UseLegacyCheck else dHash_check(file_path, byte_array)):
                         with open(file_path, "wb") as stream:
                             stream.write(byte_array)
-                    print(f"Download {task} is done!")
+                        SuccessCount += 1
+                        print(f"Download {task} is done!")
+                    else:
+                        SkipCount += 1
     except aiohttp.ClientError as error:
         print("aiohttp client error:", error)
+        ErrorCount += 1
     except asyncio.exceptions.TimeoutError:
         print(
             f"Connect time out!File path:{file_path}.The file will be remove...")
         os.remove(file_path)
+        ErrorCount += 1
+        
 
 
 def analyze_html_page(search: str, page: int):
@@ -126,6 +148,9 @@ def check_int_arg(ctx, parma, value):
 @click.option('--use-legacy-check',type=bool,default=False,help='Use the legacy check.')
 def cli(search, from_start, stop_at,use_legacy_check):
     global UseLegacyCheck
+    global SuccessCount
+    global SkipCount
+    global ErrorCount
     UseLegacyCheck = use_legacy_check
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -135,12 +160,14 @@ def cli(search, from_start, stop_at,use_legacy_check):
     if messages_size != 0:
         every_task_count = messages_size // 2
         tasks = [messages[i:i + every_task_count]
-                 for i in range(0, messages_size, every_task_count)]
+                 for i in range(0, messages_size, every_task_count)] if every_task_count != 0 else [messages]
         loop.run_until_complete(
-                asyncio.gather(*(map(lambda task: asyncio.ensure_future(
-                    download(task, "illustrations"),loop=loop), tasks)))
-        )
+            asyncio.gather(*(map(lambda task: asyncio.ensure_future(
+                download(task, "illustrations"),loop=loop), tasks))))
         print("Everything is ok!")
+        print(f"In this process,you have {ErrorCount} illustrations that cannot be downloaded,")
+        print(f"{SkipCount} illustrations that refuse to be written to the local disk because of repetition,")
+        print(f"{SuccessCount} illustrations were successfully downloaded.")
     else:
         print("Not found any illustration.")
 
@@ -148,5 +175,8 @@ def cli(search, from_start, stop_at,use_legacy_check):
 if __name__ == "__main__":
     if version_info.major != 3 or version_info.minor < 7:
         raise RuntimeError("Please use Python 3.7 or later.")
+    if NeedRestart:
+        print("Please try to restart this script.")
+        exit(0)
     cli(None, None, None)
     pass
