@@ -121,6 +121,7 @@ async def download(tasks: list, save_dir: str):
 
 
 def analyze_html_page(search: str, page: int):
+    pattern = re.compile(r'directlink +[^\s^"]*')
     header = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:85.0) Gecko/20100101 Firefox/85.0"
     }
@@ -129,7 +130,7 @@ def analyze_html_page(search: str, page: int):
             f"https://konachan.net/post?page={page}&tags={search}", headers=header)).read().decode('utf-8')
         # soup = BeautifulSoup(html, 'lxml')  # Use lxml to analyze html content
         soup = BeautifulSoup(html, "html.parser")  # Use python3 implementation
-        return map(lambda content: content['href'], soup.find_all("a", class_="directlink largeimg"))
+        return map(lambda content: content['href'], soup.find_all("a", class_= pattern))
     except:
         raise RuntimeError("Have a error during analyze html process.")
 
